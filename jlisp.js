@@ -1,8 +1,9 @@
 // TODO
-// * elem
-// * cat
-// * map
-// * filter
+// / elem
+// / cat
+// / map
+// / filter
+// / keyword
 // / join
 // / dict
 // / println, prn
@@ -52,12 +53,34 @@ function init () {
     MULT = sym("*");
     SET = sym("set!");
 
-    "def defn fun self if do cat join map f x".split(" ").forEach(function (x) {
+    "nil false def quote defn fun self apply if do cat join map f x".split(" ").forEach(function (x) {
         global[x.toUpperCase()] = sym(x);
     });
 
     GENV = new Env(null, [PLUS, plus, sym("*"), mult, sym("<="), lte, sym("inc"), inc, sym("dec"), dec,
-        sym("prn"), prn]);
+        sym("prn"), prn, sym("println"), println, sym("elem"), elem, sym("dict"), dict, 
+        sym("list"), list, sym("cat"), cat, sym("join"), join, sym("cons"), cons, sym("car"), car,
+        sym("cdr"), cdr, sym("="), eq, sym("keys"), keys, sym("reverse!"), reverse_bang, 
+        sym("even?"), is_even
+        ]);
+
+    eval(read(`
+        (defn map (f ls)
+          (defn g (ls acc)
+            (if ls
+              (g (cdr ls) (cons (f (car ls)) acc))
+              (reverse! acc) ) )
+          (g ls '()) )
+
+        (defn filter (f ls)
+          (defn g (ls acc)
+            (if ls
+              (if (f (car ls))
+                (g (cdr ls) (cons (car ls) acc))
+                (g (cdr ls) acc) )
+              (reverse! acc) ) )
+          (g ls '()) )
+    `));
 }
 
 function println (...args) {
@@ -94,11 +117,24 @@ function run_tests () {
     assert(["a", "b", "c"].zip([1, 2, 3]), ["a", 1, "b", 2, "c", 3]);
     assert(eval(read('((fun (x) (+ 1 x)) 5)')), 6);
     assert(eval(read('(if 2 99 88)')), 99);
+    assert(read('(elem {:a "alif" :b "ba"} :b)'), 
+        [sym("elem"), [sym("dict"), keyword(":a"), "alif", keyword(":b"), "ba"], keyword(":b")]);
+    assert(eval(read('(elem {:a "alif" :b "ba"} :b)')), "ba");
+    assert(eval(read("(map inc '(1 2 3))")), [2, 3, 4]);
+    assert(eval(read("(filter even? '(1 2 3 4))")), [2, 4]);
+    
+    assert(eval(read(`
+        ;=((fun (n) 
+           (if (<= n 2) n
+             (* n (self (dec n))) ) )=; 4 ;)
+           `)), 4);
+
     assert(eval(read(`
         ((fun (n) 
            (if (<= n 2) n
              (* n (self (dec n))) ) ) 4)
            `)), 24);
+
     assert(eval(read(`
         ((fun fac (n) 
            (if (<= n 2) n
@@ -119,7 +155,14 @@ function truthy (x) {
 function eval (x, e = GENV) {
     while (1) {
         if (Array.isArray(x)) {
-            if (x[0] === DEF) {
+            if (x[0].length === 0) {
+                return x;
+            }
+            else if (x[0] === APPLY) {
+                // [apply dict [:a 1]] => [dict :a 1]
+                x = cons(x[1], x[2]);
+            }
+            else if (x[0] === DEF) {
                 // (def k v)
                 e.add_var(x[1], eval(x[2], e));
                 return null;
@@ -128,6 +171,15 @@ function eval (x, e = GENV) {
                 // (def k v)
                 e.set_var(x[1], eval(x[2], e));
                 return null;
+            }
+            else if (x[0] === QUOTE) {
+                return x[1];
+            }
+            else if (x[0] === DO) {
+                for (let i = 1; i < x.length - 1; i += 1) {
+                    eval(x[i], e);
+                }
+                x = x[x.length - 1];
             }
             else if (x[0] === IF) {
                 // (if cond conseq alt)
@@ -189,9 +241,12 @@ function eval (x, e = GENV) {
                     //console.log("eval: next x: " + x);
                 }
                 else {
-                    throw("eval: idk..");
+                    throw("eval: idk: " + to_str(x));
                 }
             }
+        }
+        else if (x === NIL || x === FALSE) {
+            return x;
         }
         else if (x instanceof Sym) {
             //console.log("eval: var lookup: " + x + ", e: " + e);
@@ -218,6 +273,56 @@ function Fun (e, parms, body, nm) {
 
 Fun.prototype.toString = function () {
     return "#Fun";
+}
+  
+function car (ls) {
+    return ls[0];
+}
+
+function cdr (ls) {
+    if (!Array.isArray(ls))
+        throw("cdr: expected array, not: " + ls);
+    return ls.slice(1);
+}
+
+function cons (a, b) {
+    return [a].concat(b);
+}
+
+function join (ls, sep) {
+    return ls.join(sep);
+}
+
+function cat (...args) {
+    return args.join("");
+}
+
+function list (...args) {
+    return args;
+}
+
+function reverse_bang (ls) {
+    return ls.reverse();
+}
+
+function keys (d) {
+    return Object.keys(d);
+}
+
+function dict (...args) {
+    let ret = new WeakMap();
+    for (let i = 0; i < args.length; i += 1) {
+        ret[args[i]] = args[i + 1];
+    }
+    return ret;
+}
+
+function elem (obj, k, alt) {
+        return obj[k] || alt;
+}
+
+function is_even (n) {
+    return n % 2 === 0;
 }
 
 function inc (n) {
@@ -346,11 +451,13 @@ function expand_arrow (replacement, x) {
 }
 
 function lex (s) {
-    return s.match(/"(?:\\"|[^"])*"|[()]|[^()\[\]{}\s\t\n]+/g);
+    s = s.replace(/;=[\s\S]+?=;/g, "");
+    s = s.replace(/;.*/g, "");
+    return s.match(/"(?:\\"|[^"])*"|[(){}]|[^()\[\]{}\s\t\n]+/g);
 }
 
 function parse (toks) {
-    let ret = ["do"];
+    let ret = [DO];
     while (toks.length) {
         ret.push(parse1(toks));
     }
@@ -362,7 +469,7 @@ function Sym (name) {
 }
 
 Sym.prototype.toString = function () {
-    return "$"+ this.name;
+    return this.name;
 }
 
 let sym = (function () {
@@ -370,6 +477,23 @@ let sym = (function () {
     return function (name) {
         if (!cache[name])
             cache[name] = new Sym(name);
+        return cache[name];
+    }
+}());
+
+function Keyword (name) {
+    this.name = name;
+}
+
+Keyword.prototype.toString = function () {
+    return this.name;
+}
+
+let keyword = (function () {
+    let cache = new WeakMap();
+    return function (name) {
+        if (!cache[name])
+            cache[name] = new Keyword(name);
         return cache[name];
     }
 }());
@@ -391,10 +515,18 @@ function parse1 (toks) {
         }
         assert(toks.shift(), "}");
         ret.unshift(sym("dict"));
+        //println("parse1: dict: ", to_str(ret));
         return ret;
+    }
+    else if (tok === "'") {
+        return [QUOTE, parse1(toks)];
     }
     else if (tok[0] === '"') {
         return tok.substring(1, tok.length-1);
+    }
+    else if (tok[0] === ':') {
+        //println("parse1: keyword: ", to_str(tok));
+        return keyword(tok);
     }
     else if (!isNaN(tok)) {
         return +tok;
@@ -406,8 +538,12 @@ function parse1 (toks) {
 
 function assert (a, b) {
     if (!eq_value(a, b)) {
-        throw(a + " not= " + b);
+        throw(to_str(a) + " not= " + to_str(b));
     }
+}
+
+function eq (a, b) {
+    return a === b;
 }
 
 function eq_value (a, b) {
