@@ -1,4 +1,5 @@
 // TODO
+// ? use Map instead of WeakMap
 // / elem
 // / cat
 // / map
@@ -61,7 +62,7 @@ function init () {
         sym("prn"), prn, sym("println"), println, sym("elem"), elem, sym("dict"), dict, 
         sym("list"), list, sym("cat"), cat, sym("join"), join, sym("cons"), cons, sym("car"), car,
         sym("cdr"), cdr, sym("="), eq, sym("keys"), keys, sym("reverse!"), reverse_bang, 
-        sym("even?"), is_even
+        sym("even?"), is_even, sym("in"), js_in, sym("cdr!"), cdr_bang, sym("identity"), identity
         ]);
 
     eval(read(`
@@ -70,7 +71,7 @@ function init () {
             (if ls
               (g (cdr ls) (cons (f (car ls)) acc))
               (reverse! acc) ) )
-          (g ls '()) )
+          (g ls nil) )
 
         (defn filter (f ls)
           (defn g (ls acc)
@@ -80,6 +81,12 @@ function init () {
                 (g (cdr ls) acc) )
               (reverse! acc) ) )
           (g ls '()) )
+
+    (defn find (f ls)
+      (if (f (car ls))
+          (car ls)
+          (find f (cdr ls)) ) )
+
     `));
 }
 
@@ -122,7 +129,26 @@ function run_tests () {
     assert(eval(read('(elem {:a "alif" :b "ba"} :b)')), "ba");
     assert(eval(read("(map inc '(1 2 3))")), [2, 3, 4]);
     assert(eval(read("(filter even? '(1 2 3 4))")), [2, 4]);
-    
+    assert(eval(read("(find even? '(1 2 3))")), 2);
+    assert(eval(read("(set! '(1 2 3) 1 22)")), [1, 22, 3]);
+    assert(eval(read("true")), true);
+    assert(eval(read(":bucket")), keyword(":bucket"));
+    assert(eval(read("false")), false);
+    assert(eval(read("(cons 1 nil)")), [1]);
+    assert(eval(read("(if '() 11 22)")), 22);
+    assert(eval(read("(if nil 11 22)")), 22);
+    assert(eval(read("(if false 11 22)")), 22);
+    assert(eval(read("(if true 11 22)")), 11);
+    assert(eval(read("(in '(1 2 3) 2)")), true);
+    assert(eval(read("(cdr '(1))")), []);
+    assert(eval(read("(= (elem '(:frog :whiskey :bucket) 2) :bucket)")), true);
+    assert(eval(read("(map identity '(:frog :whiskey :bucket))")), 
+           [keyword(":frog"), keyword(":whiskey"), keyword(":bucket")]);
+    assert(eval(read("(car (map identity '(:frog :whiskey :bucket)))")), keyword(":frog"));
+    assert(eval(read("(in '(:frog :whiskey :bucket) :bucket)")), true);
+    assert(eval(read("(in (cdr '(:frog :whiskey :bucket)) :bucket)")), true);
+    assert(eval(read("(in (keys (dict :frog 1 :whiskey 2 :bucket 3)) :bucket)")), true);
+
     assert(eval(read(`
         ;=((fun (n) 
            (if (<= n 2) n
@@ -168,9 +194,31 @@ function eval (x, e = GENV) {
                 return null;
             }
             else if (x[0] === SET) {
-                // (def k v)
-                e.set_var(x[1], eval(x[2], e));
-                return null;
+                let v;
+                if (x[1] instanceof Sym) {
+                    // (set! k v)
+                    let k = x[1], 
+                        v = eval(x[2], e);
+                    e.set_var(x[1], v);
+                    return v;
+                }
+                else if (x[1] instanceof Map) {
+                    // (set! obj k v)
+                    let obj = eval(x[1], e), 
+                        k = x[2], 
+                        v = eval(x[3], e);
+                    obj.set(k, v);
+                    return obj;
+                }
+                else if (x[1] instanceof WeakMap || Array.isArray(x[1])) {
+                    // (set! obj k v)
+                    let obj = eval(x[1], e), 
+                        k = x[2], 
+                        v = eval(x[3], e);
+                    obj[k] = v;
+                    //e.set_obj(obj, k, v);
+                    return obj;
+                }
             }
             else if (x[0] === QUOTE) {
                 return x[1];
@@ -245,8 +293,8 @@ function eval (x, e = GENV) {
                 }
             }
         }
-        else if (x === NIL || x === FALSE) {
-            return x;
+        else if (x === NIL) {
+            return [];
         }
         else if (x instanceof Sym) {
             //console.log("eval: var lookup: " + x + ", e: " + e);
@@ -276,7 +324,16 @@ Fun.prototype.toString = function () {
 }
   
 function car (ls) {
+    if (!Array.isArray(ls)) throw("car: expected list, not: " + ls);
+    //println("car: ls: ", ls, ", ls[0]: ", ls[0]);
     return ls[0];
+}
+
+function cdr_bang (ls) {
+    if (!Array.isArray(ls))
+        throw("cdr: expected array, not: " + ls);
+    ls.shift();
+    return ls;
 }
 
 function cdr (ls) {
@@ -305,24 +362,41 @@ function reverse_bang (ls) {
     return ls.reverse();
 }
 
-function keys (d) {
-    return Object.keys(d);
+function keys (obj) {
+    if (obj instanceof Map) {
+        let ret = [];
+        for (var x of obj) {
+            ret.push(x[0]);
+        }
+        //prn("keys: ret: ", ret, ", array? : ", Array.isArray(ret));
+        return ret;
+    } else {
+        return Object.keys(d);
+    }
 }
 
 function dict (...args) {
-    let ret = new WeakMap();
-    for (let i = 0; i < args.length; i += 1) {
-        ret[args[i]] = args[i + 1];
+    let ret = new Map();
+    for (let i = 0; i < args.length; i += 2) {
+        ret.set(args[i], args[i + 1]);
     }
     return ret;
 }
 
 function elem (obj, k, alt) {
+    if (obj instanceof Map) {
+        return obj.get(k) || alt;
+    } else {
         return obj[k] || alt;
+    }
 }
 
 function is_even (n) {
     return n % 2 === 0;
+}
+
+function identity (x) {
+    return x;
 }
 
 function inc (n) {
@@ -331,6 +405,16 @@ function inc (n) {
 
 function dec (n) {
     return n - 1;
+}
+
+function js_in (obj, x) {
+    if (obj instanceof Map) {
+        return obj.has(x);
+    } else if (Array.isArray(obj) ){
+        return obj.includes(x);
+    } else {
+        return "in() only works on Map and Array !";
+    }
 }
 
 function plus (...xs) {
@@ -374,6 +458,15 @@ Env.prototype.set_var = function (k, v) {
     }
     else if (this.parent) {
         this.parent.set_var(k, v);
+    }
+}
+
+Env.prototype.set_obj = function (obj, k, v) {
+    if (this.dict[obj]) {
+        this.dict[obj][k] = v;
+    }
+    else if (this.parent) {
+        this.parent.set_obj(obj, k, v);
     }
 }
 
@@ -508,6 +601,9 @@ function parse1 (toks) {
         assert(toks.shift(), ")");
         return ret;
     }
+    else if (tok === ")") {
+        throw("unexpected ..)..");
+    }
     else if (tok === "{") {
         let ret = [];
         while (toks.length && toks[0] !== "}") {
@@ -527,6 +623,12 @@ function parse1 (toks) {
     else if (tok[0] === ':') {
         //println("parse1: keyword: ", to_str(tok));
         return keyword(tok);
+    }
+    else if (tok === "true") {
+        return true;
+    }
+    else if (tok === "false") {
+        return false;
     }
     else if (!isNaN(tok)) {
         return +tok;
