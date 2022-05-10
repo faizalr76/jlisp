@@ -50,6 +50,7 @@ function main () {
 function init () {
     ARROW = sym("->");
     QMARK = sym("?");
+    PERCENT = sym("%");
     PLUS = sym("+");
     MULT = sym("*");
     SET = sym("set!");
@@ -62,9 +63,11 @@ function init () {
         sym("prn"), prn, sym("println"), println, sym("elem"), elem, sym("dict"), dict, 
         sym("list"), list, sym("cat"), cat, sym("join"), join, sym("cons"), cons, sym("car"), car,
         sym("cdr"), cdr, sym("="), eq, sym("keys"), keys, sym("reverse!"), reverse_bang, 
-        sym("even?"), is_even, sym("in"), js_in, sym("cdr!"), cdr_bang, sym("identity"), identity
+        sym("even?"), is_even, sym("in"), js_in, sym("cdr!"), cdr_bang, sym("identity"), identity,
+        sym("filter"), js_filter, sym("find"), js_find, sym("map"), js_map
         ]);
 
+    /*
     eval(read(`
         (defn map (f ls)
           (defn g (ls acc)
@@ -73,6 +76,7 @@ function init () {
               (reverse! acc) ) )
           (g ls nil) )
 
+        ;=
         (defn filter (f ls)
           (defn g (ls acc)
             (if ls
@@ -86,8 +90,9 @@ function init () {
       (if (f (car ls))
           (car ls)
           (find f (cdr ls)) ) )
+           =;
 
-    `));
+    `)); */
 }
 
 function println (...args) {
@@ -115,9 +120,9 @@ function run_tests () {
     assert(read('(cat "a" "b")'), [CAT, "a", "b"]);
     assert(read('(defn f (x) (cat x "x"))'), 
         [DEF, sym("f"), [FUN, [sym("x")], [CAT, sym("x"), "x"]]]);
-    assert(replace_qmark([sym("join"), sym("?"), " "], sym("x")), [JOIN, X, " "]);
-    assert(replace_qmark([PLUS, 1, [MULT, 2, QMARK]], X), [PLUS, 1, [MULT, 2, X]]);
-    assert(read('(-> x (map f ?) (join ? " "))'), [JOIN, [MAP, F, X], " "]);
+    assert(replace_qmark([sym("join"), PERCENT, " "], sym("x")), [JOIN, X, " "]);
+    assert(replace_qmark([PLUS, 1, [MULT, 2, PERCENT]], X), [PLUS, 1, [MULT, 2, X]]);
+    assert(read('(-> x (map f %) (join % " "))'), [JOIN, [MAP, F, X], " "]);
     assert(eval(read('(+ 2 3)')), 5);
     assert(eval(read('((fun () (+ 1 3)))')), 4);
     assert(read('((fun (x) (+ 1 x)) 5)'), [[FUN, [X], [PLUS, 1, X]], 5]);
@@ -128,7 +133,10 @@ function run_tests () {
         [sym("elem"), [sym("dict"), keyword(":a"), "alif", keyword(":b"), "ba"], keyword(":b")]);
     assert(eval(read('(elem {:a "alif" :b "ba"} :b)')), "ba");
     assert(eval(read("(map inc '(1 2 3))")), [2, 3, 4]);
+
     assert(eval(read("(filter even? '(1 2 3 4))")), [2, 4]);
+    assert(eval(read("(filter (fun (n) (= n 2)) '(1 2 3 4))")), [2]);
+
     assert(eval(read("(find even? '(1 2 3))")), 2);
     assert(eval(read("(set! '(1 2 3) 1 22)")), [1, 22, 3]);
     assert(eval(read("true")), true);
@@ -179,6 +187,7 @@ function truthy (x) {
 }
 
 function eval (x, e = GENV) {
+    //console.log("eval: x: " + x);
     while (1) {
         if (Array.isArray(x)) {
             if (x[0].length === 0) {
@@ -322,7 +331,46 @@ function Fun (e, parms, body, nm) {
 Fun.prototype.toString = function () {
     return "#Fun";
 }
+
+Fun.prototype.call = function (ignore, ...args) {
+    let pargs = this.parms.zip(args);
+    //console.log("Fun: pargs: " + pargs);
+    return eval(this.body,
+         new Env(
+            this.e,
+            pargs, //this.parms.zip(arg),
+            this) );
+}
   
+function js_filter (f, xs) {
+    let ret = [];
+    xs.forEach(function (x) {
+        //console.log("filter: x: " + x);
+        if (truthy(f.call(null, x))) {
+            ret.push(x);
+        }
+    });
+    return ret;
+}
+  
+function js_map (f, xs) {
+    //console.log("js_map: xs: " + xs);
+    let ret = [];
+    for (let i = 0; i < xs.length; i += 1) {
+        ret.push(f.call(null, xs[i]));
+    }
+    return ret;
+}
+  
+function js_find (f, xs) {
+    for (let i = 0; i < xs.length; i += 1) {
+        if (truthy(f.call(null, xs[i]))) {
+            return xs[i];
+        }
+    }
+    return [];
+}
+
 function car (ls) {
     if (!Array.isArray(ls)) throw("car: expected list, not: " + ls);
     //println("car: ls: ", ls, ", ls[0]: ", ls[0]);
@@ -371,7 +419,7 @@ function keys (obj) {
         //prn("keys: ret: ", ret, ", array? : ", Array.isArray(ret));
         return ret;
     } else {
-        return Object.keys(d);
+        return Object.keys(obj);
     }
 }
 
@@ -392,7 +440,9 @@ function elem (obj, k, alt) {
 }
 
 function is_even (n) {
-    return n % 2 === 0;
+    let ret = n % 2 === 0;
+    //console.log("is_even: n: ", n, ", ret: " + ret);
+    return ret;
 }
 
 function identity (x) {
@@ -526,9 +576,11 @@ function replace_qmark (x, replacement) {
             return replace_qmark(xi, replacement);
         });
     }
-    else if (x === sym("?")) {
+    else if (x === sym("%")) {
         return replacement;
-    } else { return x;
+    } 
+    else { 
+        return x;
     }
 }
 
@@ -546,7 +598,7 @@ function expand_arrow (replacement, x) {
 function lex (s) {
     s = s.replace(/;=[\s\S]+?=;/g, "");
     s = s.replace(/;.*/g, "");
-    return s.match(/"(?:\\"|[^"])*"|[(){}]|[^()\[\]{}\s\t\n]+/g);
+    return s.match(/"(?:\\"|[^"])*"|[(){}%]|[^()\[\]{}\s\t\n]+/g);
 }
 
 function parse (toks) {
