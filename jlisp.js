@@ -24,13 +24,17 @@ Array.prototype.zip = function (xs) {
     return ret;
 };
 
-WeakMap.prototype.toString = function () {
-    return "#WeakMap";
+Map.prototype.toString = function () {
     let ret = [];
-    Object.keys(this).forEach(function (k) {
-        ret.push (k + ": " + this[k]);
-    });
-    return ret.join(", ");
+    let ks = this.keys();
+    let last = this.size;
+    console.log("Map: last: " + last);
+    last = last < 10 ? last : 10;
+    for (let i = 0; i < last; i += 1) {
+        let k = ks.next().value;
+        ret.push (k + ": " + this.get(k));
+    }
+    return "(dict " + ret.join(", ") + ")";
 }
 
 Function.prototype.toString = function () {
@@ -203,29 +207,24 @@ function eval (x, e = GENV) {
                 return null;
             }
             else if (x[0] === SET) {
-                let v;
-                if (x[1] instanceof Sym) {
+                if (x.length === 3) {
                     // (set! k v)
                     let k = x[1], 
                         v = eval(x[2], e);
                     e.set_var(x[1], v);
                     return v;
                 }
-                else if (x[1] instanceof Map) {
+                else if (x.length === 4) {
                     // (set! obj k v)
                     let obj = eval(x[1], e), 
-                        k = x[2], 
+                        k = eval(x[2], e), 
                         v = eval(x[3], e);
-                    obj.set(k, v);
-                    return obj;
-                }
-                else if (x[1] instanceof WeakMap || Array.isArray(x[1])) {
-                    // (set! obj k v)
-                    let obj = eval(x[1], e), 
-                        k = x[2], 
-                        v = eval(x[3], e);
-                    obj[k] = v;
-                    //e.set_obj(obj, k, v);
+                    if (obj instanceof Map) {
+                        obj.set(k, v);
+                    }
+                    else {
+                        obj[k] = v;
+                    }
                     return obj;
                 }
             }
