@@ -11,6 +11,33 @@
 // / if
 // / fun
 
+MACROS = new Map();
+
+function Sym (name) {
+    this.name = name;
+}
+
+Sym.prototype.toString = function () {
+    return this.name;
+}
+
+let sym = (function () {
+    let cache = new WeakMap();
+    return function (name) {
+        if (!cache[name])
+            cache[name] = new Sym(name);
+        return cache[name];
+    }
+}());
+
+let gensym = (function () {
+    let n = 0;
+    return function (name) {
+        n += 1;
+        return sym("#" + n);
+    }
+}());
+
 Array.prototype.toString = function () {
     return "[" + this.join(", ") + "]";
 };
@@ -22,6 +49,16 @@ Array.prototype.zip = function (xs) {
         ret.push(xs[i]);
     }
     return ret;
+};
+
+Array.prototype.unzip = function () {
+    let parms = [];
+    let args = [];
+    for (let i = 0; i < this.length; i += 2) {
+        parms.push(this[i]);
+        args.push(this[i + 1]);
+    }
+    return [parms, args];
 };
 
 Map.prototype.toString = function () {
@@ -64,11 +101,13 @@ function init () {
     });
 
     GENV = new Env(null, [PLUS, plus, sym("*"), mult, sym("<="), lte, sym("inc"), inc, sym("dec"), dec,
+        sym("<"), lt, sym(">"), gt,
         sym("prn"), prn, sym("println"), println, sym("elem"), elem, sym("dict"), dict, 
         sym("list"), list, sym("cat"), cat, sym("join"), join, sym("cons"), cons, sym("car"), car,
         sym("cdr"), cdr, sym("="), eq, sym("keys"), keys, sym("reverse!"), reverse_bang, 
         sym("even?"), is_even, sym("in"), js_in, sym("cdr!"), cdr_bang, sym("identity"), identity,
-        sym("filter"), js_filter, sym("find"), js_find, sym("map"), js_map
+        sym("filter"), js_filter, sym("find"), js_find, sym("map"), js_map, sym("has?"), js_has, 
+        sym("not"), js_not
         ]);
 
     /*
@@ -160,6 +199,17 @@ function run_tests () {
     assert(eval(read("(in '(:frog :whiskey :bucket) :bucket)")), true);
     assert(eval(read("(in (cdr '(:frog :whiskey :bucket)) :bucket)")), true);
     assert(eval(read("(in (keys (dict :frog 1 :whiskey 2 :bucket 3)) :bucket)")), true);
+    assert(jlisp("(let (a 1 b 2) (+ a b))"), 3);
+    assert(jlisp("(and 11)"), 11);
+    assert(jlisp("(and 11 22)"), 22);
+    assert(jlisp("(and 11 22 33)"), 33);
+    assert(jlisp("(and 11 nil 33)"), []);
+    //prn(read("(and nil 22 33)"));
+    //prn(read("(and false 22 33)"));
+    //throw("exit");
+    assert(jlisp("(and false 22 33)"), false);
+    assert(jlisp("(and (> 1 2) 22 33)"), false);
+    console.log("tests completed.");
 
     assert(eval(read(`
         ;=((fun (n) 
@@ -180,6 +230,10 @@ function run_tests () {
            `)), 120);
 }
 
+function jlisp (s) {
+    return eval(read(s));
+}
+
 function truthy (x) {
     if (Array.isArray(x) && x.length === 0) {
         return false;
@@ -192,6 +246,7 @@ function truthy (x) {
 
 function eval (x, e = GENV) {
     //console.log("eval: x: " + x);
+    try {
     while (1) {
         if (Array.isArray(x)) {
             if (x[0].length === 0) {
@@ -304,6 +359,10 @@ function eval (x, e = GENV) {
         else if (x === NIL) {
             return [];
         }
+        else if (x === false || x === true) {
+            //println("eval: return boolean: ", x);
+            return x;
+        }
         else if (x instanceof Sym) {
             //console.log("eval: var lookup: " + x + ", e: " + e);
             let ret = e.find_var(x);
@@ -314,6 +373,11 @@ function eval (x, e = GENV) {
             return x;
         }
     } // while.
+    }
+    catch (e) {
+        console.log("eval: error: " + e + ", x: " + x);
+        throw(e);
+    }
 }
 
 function Fun (e, parms, body, nm) {
@@ -341,6 +405,23 @@ Fun.prototype.call = function (ignore, ...args) {
             this) );
 }
   
+function js_not(x) {
+    return !truthy(x);
+}
+
+function js_has (obj, k) {
+    //println("has?: obj: ", obj, ", k: ", k);
+    if (obj instanceof Map) {
+        return obj.has(k);
+    }
+    else if(Array.isArray(obj)) {
+        return obj.includes(k);
+    }
+    else {
+        throw("js_has: error: obj is not Array or Map");
+    }
+}
+
 function js_filter (f, xs) {
     let ret = [];
     xs.forEach(function (x) {
@@ -478,6 +559,24 @@ function mult (...xs) {
     });
 }
 
+function gt (...xs) {
+    return xs.reduce(function (a, b) {
+        return a > b;
+    });
+}
+
+function gte (...xs) {
+    return xs.reduce(function (a, b) {
+        return a >= b;
+    });
+}
+
+function lt (...xs) {
+    return xs.reduce(function (a, b) {
+        return a < b;
+    });
+}
+
 function lte (...xs) {
     return xs.reduce(function (a, b) {
         return a <= b;
@@ -486,43 +585,44 @@ function lte (...xs) {
 
 function Env (parent, xs, fn) {
     this.parent = parent;
-    this.dict = new WeakMap();
+    this.dict = new Map();
     //prn("Env: xs: ", xs);
     for (let i = 0; i < xs.length; i += 2) {
-        this.dict[xs[i]] = xs[i + 1];
+        this.dict.set(xs[i], xs[i + 1]);
     }
     //console.log("Env: dict: " + this.dict);
     if (fn) {
-        this.dict[fn.nm] = fn;
+        this.dict.set(fn.nm, fn);
     }
 }
 
 Env.prototype.add_var = function (k, v) {
-    this.dict[k] = v;
+    this.dict.set(k, v);
 }
 
 Env.prototype.set_var = function (k, v) {
-    if (this.dict[k]) {
-        this.dict[k] = v;
+    if (this.dict.has(k)) {
+        this.dict.set(k, v);
     }
     else if (this.parent) {
         this.parent.set_var(k, v);
     }
 }
 
+/*
 Env.prototype.set_obj = function (obj, k, v) {
-    if (this.dict[obj]) {
-        this.dict[obj][k] = v;
+    if (this.dict.has(obj)) {
+        this.dict.set(obj][k], v);
     }
     else if (this.parent) {
         this.parent.set_obj(obj, k, v);
     }
-}
+}*/
 
 Env.prototype.find_var = function (k) {
-    if (this.dict[k]) {
+    if (this.dict.has(k)) {
         //console.log("Env: find_var: " + k);
-        let ret = this.dict[k];
+        let ret = this.dict.get(k);
         //console.log("Env: find_var'd: " + ret);
         return ret;
     }
@@ -548,17 +648,11 @@ function load (file) {
 
 function expand (x) {
     if (Array.isArray(x)) {
-        if (x[0] === DEFN) {
-            // (defn f (x) x) => (def f (fun (x) x))
-            x.shift();
-            let fname = x.shift();
-            x.unshift(FUN);
-            return [DEF, fname, expand(x)];
-        }
-        else if (x[0] === ARROW) {
-            x.shift();
-            let a = x.shift();
-            return expand(expand_arrow(a, x));
+        if (MACROS.has(x[0])) {
+            //console.log("expand: calling macro: x: " + x);
+            let args = x.slice(1);
+            let ast = MACROS.get(x[0]).apply(null, args);
+            return expand(ast);
         }
         else {
             return x.map(expand);
@@ -566,6 +660,27 @@ function expand (x) {
     }
     else {
         return x;
+    }
+}
+
+MACROS.set(sym("defn"), transform_defn);
+function transform_defn (...args) {
+    // (defn f (x) x) => (def f (fun (x) x))
+    console.log("transform_defn: args: " + args);
+    let fname = args[0];
+    let body = [FUN].concat(args.slice(1));
+    return [DEF, fname, expand(body)];
+}
+
+MACROS.set(sym("->"), transform_arrow);
+function transform_arrow (replacement, ...x) {
+    if (x.length) {
+        let ls = x.shift();
+        let new_replacement = replace_qmark(ls, replacement);
+        return transform_arrow(new_replacement, ...x);
+    }
+    else {
+        return replacement;
     }
 }
 
@@ -583,14 +698,27 @@ function replace_qmark (x, replacement) {
     }
 }
 
-function expand_arrow (replacement, x) {
-    if (x.length) {
-        let ls = x.shift();
-        let new_replacement = replace_qmark(ls, replacement);
-        return expand_arrow(new_replacement, x);
+MACROS.set(sym("let"), transform_let);
+function transform_let (...x) {
+    // (let (a 1 b 2) (+ a b)) => ((fun (a b) (+ a b)) 1 2)
+    let pargs = x[0].unzip();
+    let parms = pargs[0];
+    let args = pargs[1];
+    let body = x.slice(1);
+    return [[FUN, parms].concat(body)].concat(args);
+}
+
+MACROS.set(sym("and"), transform_and);
+function transform_and (...x) {
+    if (x.length === 1) {
+        return x[0];
     }
-    else {
-        return replacement;
+    else if (x.length > 1) {
+        let rest = x.slice(1);
+        let k = gensym();
+        let ret = [sym("let"), [k, x[0]],
+                 [IF, k, [sym("and")].concat(rest), k]];
+        return ret;
     }
 }
 
@@ -607,23 +735,6 @@ function parse (toks) {
     }
     return ret.length === 2 ? ret[1] : ret;
 }
-
-function Sym (name) {
-    this.name = name;
-}
-
-Sym.prototype.toString = function () {
-    return this.name;
-}
-
-let sym = (function () {
-    let cache = new WeakMap();
-    return function (name) {
-        if (!cache[name])
-            cache[name] = new Sym(name);
-        return cache[name];
-    }
-}());
 
 function Keyword (name) {
     this.name = name;
@@ -711,3 +822,4 @@ function eq_value (a, b) {
 }
 
 main();
+
