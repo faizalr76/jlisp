@@ -1,0 +1,12 @@
+
+(def pwds (dict "hayy" "hayy1"))
+
+(let ()
+  (def uid (ask "uid: "))
+  (def pwd (ask "pwd: "))
+  (if (and (has? pwds uid)
+           (= pwd (elem pwds uid)))
+      (println "welcome")
+      (do (println "invalid uid or pwd")
+          (self) ) ) )
+

@@ -10,7 +10,7 @@
 // / println, prn
 // / if
 // / fun
-
+const prompt = require("prompt-sync")()
 MACROS = new Map();
 
 function Sym (name) {
@@ -96,7 +96,7 @@ function init () {
     MULT = sym("*");
     SET = sym("set!");
 
-    "nil false def quote defn fun self apply if do cat join map f x".split(" ").forEach(function (x) {
+    "break loop nil false def quote defn fun self apply if do cat join map f x".split(" ").forEach(function (x) {
         global[x.toUpperCase()] = sym(x);
     });
 
@@ -107,7 +107,7 @@ function init () {
         sym("cdr"), cdr, sym("="), eq, sym("keys"), keys, sym("reverse!"), reverse_bang, 
         sym("even?"), is_even, sym("in"), js_in, sym("cdr!"), cdr_bang, sym("identity"), identity,
         sym("filter"), js_filter, sym("find"), js_find, sym("map"), js_map, sym("has?"), js_has, 
-        sym("not"), js_not
+        sym("not"), js_not, sym("ask"), js_ask
         ]);
 
     /*
@@ -246,7 +246,7 @@ function truthy (x) {
 
 function eval (x, e = GENV) {
     //console.log("eval: x: " + x);
-    try {
+    //try {
     while (1) {
         if (Array.isArray(x)) {
             if (x[0].length === 0) {
@@ -291,6 +291,19 @@ function eval (x, e = GENV) {
                     eval(x[i], e);
                 }
                 x = x[x.length - 1];
+            }
+            else if (x[0] === LOOP) {
+                try {
+                    while (1) {
+                        for (let i = 1; i < x.length; i += 1) {
+                            eval(x[i], e);
+                        }
+                    }
+                }
+                catch (e) {
+                    println("break");
+                    return [];
+                }
             }
             else if (x[0] === IF) {
                 // (if cond conseq alt)
@@ -359,6 +372,9 @@ function eval (x, e = GENV) {
         else if (x === NIL) {
             return [];
         }
+        else if (x === BREAK) {
+           throw("break"); 
+        }
         else if (x === false || x === true) {
             //println("eval: return boolean: ", x);
             return x;
@@ -373,11 +389,11 @@ function eval (x, e = GENV) {
             return x;
         }
     } // while.
-    }
+    /*}
     catch (e) {
         console.log("eval: error: " + e + ", x: " + x);
         throw(e);
-    }
+    }*/
 }
 
 function Fun (e, parms, body, nm) {
@@ -405,6 +421,10 @@ Fun.prototype.call = function (ignore, ...args) {
             this) );
 }
   
+function js_ask (s) {
+    return prompt(s);
+}
+
 function js_not(x) {
     return !truthy(x);
 }

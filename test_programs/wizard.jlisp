@@ -1,0 +1,141 @@
+; todo: find, in, set! (for dict/arr)
+
+(def LOCATION "living room")
+(def NODES {
+  "living room" "You are in the living room. A wizard is snoring loudly on the couch."
+  "garden"      "You are in a beautiful garden. There is a wall in front of you."
+  "attic"       "You are in the attic. There is a giant wielding torch in the corner."
+  })
+
+(defn main ()
+  ;(println "test:- " (in '(:whiskey :bucket) :bucket))
+  (println (look))
+  (println (pickup "bucket"))
+  (println (walk "west"))
+    (println (pickup "chain"))
+    (println (pickup "frog"))
+    (println (inventory))
+    (println (walk "east"))
+    (println (walk "upstairs"))
+    (println (weld "chain" "bucket"))
+    (println (walk "downstairs"))
+    (println (walk "west"))
+    ;(println (dunk "bucket" "well"))
+    (println (walk "east"))
+    (println (splash "bucket" "wizard"))
+;=
+=;
+  )
+
+(defn look ()
+  (cat (describe-location LOCATION NODES)
+       (describe_paths LOCATION EDGES)
+       (describe-objects LOCATION OBJECTS)
+       ) )
+
+(defn describe-location (loc nodes)
+  (elem nodes loc) )
+
+(def EDGES {
+  "living room" (list {"place" "garden"      "dir" "west"       "means" "door"} 
+                      {"place" "attic"       "dir" "upstairs"   "means" "ladder"} )
+  "garden"      (list {"place" "living room" "dir" "east"       "means" "door"})
+  "attic"       (list {"place" "living room" "dir" "downstairs" "means" "ladder"})
+  })
+ 
+(defn describe_path (edge) 
+  (cat "There is a " (elem edge "place") " going " (elem edge "dir") " from here.") )
+
+(defn describe_paths (location edges) 
+  (-> (elem edges location)
+      (map describe_path %)
+      (join % " ")
+      ) )
+
+(def OBJECTS {
+  "whiskey" "living room"
+  "bucket"  "living room"
+  "frog"    "garden"
+  "chain"   "garden"
+  })
+
+(defn objects-at (loc objs)
+  ; doesnt work, cannot car/cdr iterable..
+  (filter (fun (k)
+            (= (elem objs k) loc) )
+          (keys objs) ) )
+
+(defn describe-objects (loc objs)
+  (-> (objects-at loc objs)
+      (map (fun (obj) (cat "You see a " obj " on the floor."))
+           % )
+      (join % " ")
+      ) )
+
+(defn pickup (obj)
+  (if (= (elem OBJECTS obj) LOCATION)
+      (do (set! OBJECTS obj "body")
+          (cat "You are now carrying the " obj ".") )
+      "You cannot get that." ) )
+
+(defn walk (dir)
+  (def next-loc 
+    (-> (elem EDGES LOCATION)
+        (find (fun (x) (= (elem x "dir") dir))
+              % ) ) )
+
+  (if next-loc
+      (do (set! LOCATION (elem next-loc "place"))
+          (look) ) 
+      "You cannot go that way." ) )
+
+(defn inventory ()
+  (dict "items" (objects-at "body" OBJECTS)) )
+
+(defn have (obj)
+  (-> (inventory)
+      (elem % "items")
+      (has? % obj) ) )
+
+(def CHAIN-WELDED nil)
+
+(defn weld (subj obj)
+  (if (and (= LOCATION "attic")
+           (= subj "chain")
+           (= obj "bucket")
+           (have "chain")
+           (have "bucket")
+           (not CHAIN-WELDED) ) 
+      (do (set! CHAIN-WELDED true)
+          "The chain is now securely welded to the bucket." )
+      "You cannot weld like that." ) )
+
+
+(def BUCKET-FILLED nil)
+
+(defn dunk (subj obj)
+  (if (and (= LOCATION "garden")
+           (= subj "bucket")
+           (= obj "well")
+           (have "bucket")
+           CHAIN-WELDED ) 
+      (do (set! BUCKET-FILLED true)
+          "The bucket is now full of water." )
+      "You cannot dunk like that. The water level is too low to reach." ) )
+
+
+
+(defn splash (subj obj)
+  (if (and (= LOCATION "living room")
+           (= subj "bucket")
+           (= obj "wizard")
+           (have "bucket") )
+      (if (not BUCKET-FILLED) "The bucket has nothing in it."
+          (have "frog") (cat "The wizard awakens and sees that you stole his frog. "
+                             "He is so upset he banishes you to the netherworld. You lose! The end." )
+          :else (cat "The wizard awakens from his slumber and greets you warmly. He hands you the "
+                     "magic low-carb donut. You win! The end." ) ) ) )
+
+(main)
+
+
